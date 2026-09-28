@@ -98,7 +98,7 @@ const canvas=$("c"), renderer=new THREE.WebGLRenderer({canvas,antialias:true});
 renderer.setPixelRatio(Math.min(devicePixelRatio,2));
 const scene=new THREE.Scene(), camera=new THREE.PerspectiveCamera(40,1,.02,50); camera.position.z=3.4;
 const globe=new THREE.Group(); scene.add(globe);
-const maxTex=renderer.capabilities.getMaxTextureSize(), aniso=renderer.capabilities.getMaxAnisotropy();
+const maxTex=renderer.capabilities.maxTextureSize, aniso=renderer.capabilities.getMaxAnisotropy();
 const setTex=t=>{t.anisotropy=aniso;t.encoding=THREE.sRGBEncoding;if(sphere.material.map)sphere.material.map.dispose();sphere.material.map=t;sphere.material.needsUpdate=true;};
 const sphere=new THREE.Mesh(new THREE.SphereGeometry(1,128,96),new THREE.MeshBasicMaterial({color:0x888888})); globe.add(sphere);
 renderer.outputEncoding=THREE.sRGBEncoding;
