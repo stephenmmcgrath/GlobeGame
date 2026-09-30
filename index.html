@@ -26,6 +26,8 @@ input[type=text]{width:100%;font:inherit;color:var(--tx);background:#0e1927;bord
 .res b.ok{color:var(--ok)}.res b.bad{color:var(--bad)}
 table{width:100%;border-collapse:collapse;font-size:14px}td{padding:5px 3px;border-bottom:1px solid var(--line)}td.r{text-align:right}td.m{color:var(--mut);font-size:12px}
 .zoom{position:fixed;right:12px;top:60px;display:flex;flex-direction:column;gap:6px;z-index:2}.zoom button{width:38px;height:38px;padding:0;font-size:20px}
+.flagbox{width:190px;max-width:70%;margin:8px 0 4px;border-radius:6px;overflow:hidden;border:1px solid var(--line);box-shadow:0 4px 14px rgba(0,0,0,.4)}
+.flagbox svg{display:block;width:100%;height:auto}
 .tabs{display:flex;gap:6px;margin:10px 0}.tabs button{flex:1;padding:8px}.tabs button.on{border-color:var(--acc);background:#2a2a1a}
 .hide{display:none!important}
 </style></head><body>
@@ -63,8 +65,7 @@ table{width:100%;border-collapse:collapse;font-size:14px}td{padding:5px 3px;bord
 <script>
 const $=id=>document.getElementById(id), ROUNDS=10, R2D=180/Math.PI, D2R=Math.PI/180;
 const DIFF=["Capital Cities","Other Major Cities","Minor Cities","Towns"];
-let CITIES=[], COUNTRIES=[], S={mode:"find",diff:0,showCountry:false}, G=null, sb=null;
-const flagEmoji=a2=>[...a2.toUpperCase()].map(ch=>String.fromCodePoint(127397+ch.charCodeAt(0))).join("");
+let CITIES=[], COUNTRIES=[], FLAGS={}, S={mode:"find",diff:0,showCountry:false}, G=null, sb=null;
 // point-in-polygon (equirectangular is fine here: used only for scoring, not display)
 function inRing(lat,lon,ring){let inside=false;
   for(let i=0,j=ring.length-1;i<ring.length;j=i++){const xi=ring[i][0],yi=ring[i][1],xj=ring[j][0],yj=ring[j][1];
@@ -212,7 +213,7 @@ function nextRound(){
     setTimeout(()=>q.focus(),50);
   }else{ // flag
     flyTo(view.lat,view.lon,Math.max(camera.position.z,2.9),700);
-    panel(`<p class="sub" style="margin:0">Drop a pin on…</p><p class="big" style="font-size:64px;line-height:1.1">${flagEmoji(c.a2)}</p><div style="height:10px"></div><button class="pri" id="lock" disabled style="width:100%">Lock in guess</button>`);
+    panel(`<p class="sub" style="margin:0">Drop a pin on…</p><div class="flagbox">${FLAGS[c.a2.toLowerCase()]||""}</div><div style="height:10px"></div><button class="pri" id="lock" disabled style="width:100%">Lock in guess</button>`);
     $("lock").onclick=()=>{G.locked=true;const inside=inCountry(G.guess.lat,G.guess.lon,c),d=inside?0:distToCountry(G.guess.lat,G.guess.lon,c),p=inside?1000:ptsCountry(d);G.score+=p;
       addOutline(c,0x4cd08a);showBoth(G.guess,{lat:c.c[1],lon:c.c[0]});
       result(inside?`<b class="ok">Inside ${esc(c.n)}!</b>`:`<b class="bad">That's ${esc(c.n)}.</b> Your pin was <b>${Math.round(d).toLocaleString()} km</b> from its border.`,p);};
@@ -273,7 +274,8 @@ Promise.all([
     const seen={};a.forEach(x=>{const k=x[0]+"|"+x[1];seen[k]=(seen[k]||0)+1;});
     CITIES=a.map(x=>({n:x[0],c:x[1],lat:x[2],lon:x[3],t:x[4],k:norm(x[0]+" "+x[1]),dup:seen[x[0]+"|"+x[1]]>1}));
   }),
-  fetch("countries.json").then(r=>r.json()).then(a=>{COUNTRIES=a;})
+  fetch("countries.json").then(r=>r.json()).then(a=>{COUNTRIES=a;}),
+  fetch("flags.json").then(r=>r.json()).then(a=>{FLAGS=a;})
 ]).then(()=>{$("start").disabled=false;$("start").textContent=`Start · ${ROUNDS} rounds`;})
   .catch(()=>{$("start").textContent="Could not load game data";});
 checkSync();
