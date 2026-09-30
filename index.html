@@ -39,9 +39,10 @@ table{width:100%;border-collapse:collapse;font-size:14px}td{padding:5px 3px;bord
 <h3>Game</h3>
 <div class="row"><button class="opt on" data-mode="find"><b>Find the City</b><br><small>Given a name, tap it on the globe</small></button>
 <button class="opt" data-mode="name"><b>Name the City</b><br><small>Given a dot, pick its name</small></button></div>
+<div class="row" style="margin-top:8px"><button class="opt" data-mode="flag"><b>Flag → Country</b><br><small>Given a flag, drop a pin on the country</small></button></div>
 <label class="chk" id="ccWrap"><input type="checkbox" id="cc"> Also show the country with the city name</label>
-<h3>Difficulty</h3>
-<div class="row" id="diff"><button class="opt on" data-d="0">Capital Cities</button><button class="opt" data-d="1">Other Major Cities</button><button class="opt" data-d="2">Minor Cities</button><button class="opt" data-d="3">Towns</button></div>
+<div id="diffSec"><h3>Difficulty</h3>
+<div class="row" id="diff"><button class="opt on" data-d="0">Capital Cities</button><button class="opt" data-d="1">Other Major Cities</button><button class="opt" data-d="2">Minor Cities</button><button class="opt" data-d="3">Towns</button></div></div>
 <h3>Player</h3><input type="text" id="player" maxlength="20" placeholder="Your name">
 <div class="row" style="margin-top:18px"><button class="pri" id="start" style="flex:2;padding:13px">Start</button><button id="scoresBtn" style="padding:13px">🏆 Scores</button></div>
 <div class="sub" id="sync" style="margin:10px 0 0"></div>
@@ -51,7 +52,7 @@ table{width:100%;border-collapse:collapse;font-size:14px}td{padding:5px 3px;bord
 <div class="row" style="align-items:center"><h1 style="flex:3">🏆 Scores</h1><button id="scoresClose" style="flex:1">Close</button></div>
 <div class="sub" id="scoresSrc"></div>
 <div class="tabs"><button class="on" data-tab="top">Top scores</button><button data-tab="recent">Recent games</button></div>
-<div class="row" id="scoreFilters"><select id="fGame"><option value="find0">Find the City</option><option value="find1">Find the City + country</option><option value="name">Name the City</option></select>
+<div class="row" id="scoreFilters"><select id="fGame"><option value="find0">Find the City</option><option value="find1">Find the City + country</option><option value="name">Name the City</option><option value="flag">Flag → Country</option></select>
 <select id="fDiff"><option value="0">Capital Cities</option><option value="1">Other Major Cities</option><option value="2">Minor Cities</option><option value="3">Towns</option></select></div>
 <div id="scoreTable" style="margin-top:10px"></div>
 </div></div>
@@ -62,7 +63,18 @@ table{width:100%;border-collapse:collapse;font-size:14px}td{padding:5px 3px;bord
 <script>
 const $=id=>document.getElementById(id), ROUNDS=10, R2D=180/Math.PI, D2R=Math.PI/180;
 const DIFF=["Capital Cities","Other Major Cities","Minor Cities","Towns"];
-let CITIES=[], S={mode:"find",diff:0,showCountry:false}, G=null, sb=null;
+let CITIES=[], COUNTRIES=[], S={mode:"find",diff:0,showCountry:false}, G=null, sb=null;
+const flagEmoji=a2=>[...a2.toUpperCase()].map(ch=>String.fromCodePoint(127397+ch.charCodeAt(0))).join("");
+// point-in-polygon (equirectangular is fine here: used only for scoring, not display)
+function inRing(lat,lon,ring){let inside=false;
+  for(let i=0,j=ring.length-1;i<ring.length;j=i++){const xi=ring[i][0],yi=ring[i][1],xj=ring[j][0],yj=ring[j][1];
+    const hit=((yi>lat)!==(yj>lat))&&(lon<(xj-xi)*(lat-yi)/((yj-yi)||1e-12)+xi);if(hit)inside=!inside;}
+  return inside;}
+function inCountry(lat,lon,country){for(const ring of country.r){
+    for(const dlon of [-360,0,360]) if(inRing(lat,lon+dlon,ring)) return true;} return false;}
+function distToRing(lat,lon,ring){let best=1e9;
+  for(let i=0;i<ring.length;i++){const d=hav(lat,lon,ring[i][1],ring[i][0]);if(d<best)best=d;}return best;}
+function distToCountry(lat,lon,country){let best=1e9;for(const ring of country.r)best=Math.min(best,distToRing(lat,lon,ring));return best;}
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 try{const c=window.GEO_CONFIG||{};
   // tolerate a pasted API address like https://xxx.supabase.co/rest/v1/
@@ -135,6 +147,8 @@ function addDot(lat,lon,color){const s=new THREE.Sprite(new THREE.SpriteMaterial
 function addArc(a,b){const va=toVec(a.lat,a.lon),vb=toVec(b.lat,b.lon),ang=va.angleTo(vb),pts=[];
   for(let i=0;i<=48;i++){const t=i/48,s=Math.sin(ang);const v=s<1e-4?va.clone():va.clone().multiplyScalar(Math.sin((1-t)*ang)/s).add(vb.clone().multiplyScalar(Math.sin(t*ang)/s));pts.push(v.normalize().multiplyScalar(1.002+.03*Math.sin(t*Math.PI)*ang/3.14));}
   const l=new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),new THREE.LineBasicMaterial({color:0xffffff,transparent:true,opacity:.75}));globe.add(l);marks.push(l);}
+function addOutline(country,color){for(const ring of country.r){const pts=ring.map(([lon,lat])=>toVec(lat,lon,1.004));
+    const l=new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(pts),new THREE.LineBasicMaterial({color,transparent:true,opacity:.85}));globe.add(l);marks.push(l);}}
 let anim=null;
 function flyTo(lat,lon,z,ms=900){const f={lat:view.lat,lon:view.lon,z:camera.position.z},dl=((lon-f.lon+540)%360)-180,t0=performance.now();
   anim=t=>{const k=Math.min(1,(t-t0)/ms),e=k*k*(3-2*k);view.lat=f.lat+(lat-f.lat)*e;view.lon=f.lon+dl*e;if(z)camera.position.z=f.z+(z-f.z)*e;if(k>=1)anim=null;};}
@@ -154,7 +168,7 @@ canvas.addEventListener("pointercancel",e=>{ptrs.delete(e.pointerId);downAt=null
 canvas.addEventListener("wheel",e=>{e.preventDefault();zoom(e.deltaY*.0025);},{passive:false});
 $("zi").onclick=()=>zoom(-.5);$("zo").onclick=()=>zoom(.5);
 const ray=new THREE.Raycaster(),ndc=new THREE.Vector2();
-function clickGlobe(e){if(!G||G.mode!=="find"||G.locked)return;ndc.set(e.clientX/innerWidth*2-1,-(e.clientY/innerHeight)*2+1);ray.setFromCamera(ndc,camera);
+function clickGlobe(e){if(!G||(G.mode!=="find"&&G.mode!=="flag")||G.locked)return;ndc.set(e.clientX/innerWidth*2-1,-(e.clientY/innerHeight)*2+1);ray.setFromCamera(ndc,camera);
   applyView();globe.updateMatrixWorld(true);const h=ray.intersectObject(sphere)[0];if(!h)return;
   const ll=toLatLon(globe.worldToLocal(h.point.clone()));G.guess=ll;clearMarks();addDot(ll.lat,ll.lon,"amber");$("lock").disabled=false;}
 (function loop(t){requestAnimationFrame(loop);if(anim)anim(t);applyView();renderer.render(scene,camera);})(0);
@@ -162,12 +176,16 @@ function clickGlobe(e){if(!G||G.mode!=="find"||G.locked)return;ndc.set(e.clientX
 // ---------- game ----------
 const fmt=c=>G.cc&&G.mode==="find"?`${c.n}, ${c.c}`:c.n;
 const pts=d=>Math.round(1000*Math.exp(-d/1500));
+const ptsCountry=d=>Math.round(1000*Math.exp(-d/650)); // countries are bigger targets than cities, so being outside costs more per km
 function startGame(){
-  const pool=CITIES.filter(c=>c.t===S.diff);
-  G={mode:S.mode,diff:S.diff,cc:S.showCountry,picks:[...pool].sort(()=>Math.random()-.5).slice(0,ROUNDS),i:0,score:0,locked:false};
+  let picks;
+  if(S.mode==="flag") picks=[...COUNTRIES].sort(()=>Math.random()-.5).slice(0,ROUNDS);
+  else picks=[...CITIES.filter(c=>c.t===S.diff)].sort(()=>Math.random()-.5).slice(0,ROUNDS);
+  G={mode:S.mode,diff:S.diff,cc:S.showCountry,picks,i:0,score:0,locked:false};
   $("menu").classList.add("hide");$("scores").classList.add("hide");nextRound();
 }
-function status(){$("status").textContent=`${G.mode==="find"?"Find":"Name"} · ${DIFF[G.diff]} · Round ${Math.min(G.i+1,ROUNDS)}/${ROUNDS} · ${G.score} pts`;}
+const modeLabel=m=>m==="find"?"Find":m==="name"?"Name":"Flag";
+function status(){$("status").textContent=`${modeLabel(G.mode)}${G.mode==="flag"?"":" · "+DIFF[G.diff]} · Round ${Math.min(G.i+1,ROUNDS)}/${ROUNDS} · ${G.score} pts`;}
 function panel(html){const p=$("panel");p.innerHTML=html;p.classList.remove("hide");}
 function nextRound(){
   if(G.i>=ROUNDS)return finish();
@@ -178,7 +196,7 @@ function nextRound(){
     $("lock").onclick=()=>{G.locked=true;const d=hav(G.guess.lat,G.guess.lon,c.lat,c.lon),p=pts(d);G.score+=p;
       addDot(c.lat,c.lon,"green");addArc(G.guess,c);showBoth(G.guess,c);
       result(`<b>${esc(c.n)}, ${esc(c.c)}</b> — you were <b>${Math.round(d).toLocaleString()} km</b> away.`,p);};
-  }else{
+  }else if(G.mode==="name"){
     flyTo(c.lat,c.lon,2.4,900);addDot(c.lat,c.lon,"red");
     panel(`<p class="sub" style="margin:0">Which city is the red circle?</p><input type="text" id="q" placeholder="Type to search ${CITIES.length.toLocaleString()} places…" autocomplete="off"><div class="list hide" id="list"></div><div style="height:10px"></div><button class="pri" id="lock" disabled style="width:100%">Submit answer</button>`);
     const q=$("q"),list=$("list");
@@ -192,6 +210,12 @@ function nextRound(){
       addDot(g.lat,g.lon,"amber");if(!ok){addArc(g,c);showBoth(g,c);}
       result(ok?`<b class="ok">Correct!</b> It's <b>${esc(c.n)}, ${esc(c.c)}</b>.`:`<b class="bad">Not quite.</b> It's <b>${esc(c.n)}, ${esc(c.c)}</b>; you chose ${esc(g.n)}, ${esc(g.c)} (${Math.round(d).toLocaleString()} km away).`,p);};
     setTimeout(()=>q.focus(),50);
+  }else{ // flag
+    flyTo(view.lat,view.lon,Math.max(camera.position.z,2.9),700);
+    panel(`<p class="sub" style="margin:0">Drop a pin on…</p><p class="big" style="font-size:64px;line-height:1.1">${flagEmoji(c.a2)}</p><div style="height:10px"></div><button class="pri" id="lock" disabled style="width:100%">Lock in guess</button>`);
+    $("lock").onclick=()=>{G.locked=true;const inside=inCountry(G.guess.lat,G.guess.lon,c),d=inside?0:distToCountry(G.guess.lat,G.guess.lon,c),p=inside?1000:ptsCountry(d);G.score+=p;
+      addOutline(c,0x4cd08a);showBoth(G.guess,{lat:c.c[1],lon:c.c[0]});
+      result(inside?`<b class="ok">Inside ${esc(c.n)}!</b>`:`<b class="bad">That's ${esc(c.n)}.</b> Your pin was <b>${Math.round(d).toLocaleString()} km</b> from its border.`,p);};
   }
 }
 function result(msg,p){status();panel(`<div class="res"><p style="margin:0 0 8px">${msg}</p><p class="big" style="color:var(--acc)">+${p} pts</p></div><div style="height:10px"></div><button class="pri" id="next" style="width:100%">${G.i+1>=ROUNDS?"See results":"Next round"}</button>`);$("next").onclick=()=>{G.i++;nextRound();};}
@@ -203,27 +227,29 @@ async function finish(){
   $("again").onclick=startGame;$("tomenu").onclick=()=>{$("panel").classList.add("hide");$("menu").classList.remove("hide");checkSync();};
   let note="Saved on this device only.";
   if(sb){try{const r=await syncPending();note=r.ok?"☁️ Score synced.":`⚠️ Sync failed (${esc(r.msg)}) — saved on this device.`;}catch(e){note="⚠️ Sync failed — saved on this device.";}}
-  const rows=await loadScores("top",rec.mode==="name"?"name":rec.show_country?"find1":"find0",rec.difficulty,10);
+  const gameKey=rec.mode==="flag"?"flag":rec.mode==="name"?"name":rec.show_country?"find1":"find0";
+  const rows=await loadScores("top",gameKey,rec.difficulty,10);
   const lb=$("lb");if(lb)lb.innerHTML=`<b>Top scores</b><table>${rows.map((r,i)=>`<tr><td>${i+1}. ${esc(r.player)}</td><td class="r">${r.score}</td></tr>`).join("")}</table><div style="margin-top:6px">${note}</div>`;
 }
 // ---------- scores screen ----------
 let tab="top";
 async function loadScores(kind,game,diff,limit=20){
-  const mode=game==="name"?"name":"find",sc=game==="find1";
+  const mode=game==="flag"?"flag":game==="name"?"name":"find",sc=game==="find1";
   if(sb){try{await syncPending();
     let q=sb.from("geo_results").select("player,mode,difficulty,show_country,score,created_at");
-    if(kind==="top"){q=q.eq("mode",mode).eq("difficulty",diff);if(mode==="find")q=q.eq("show_country",sc);q=q.order("score",{ascending:false});}
+    if(kind==="top"){q=q.eq("mode",mode);if(mode==="find")q=q.eq("difficulty",diff).eq("show_country",sc);else if(mode==="name")q=q.eq("difficulty",diff);q=q.order("score",{ascending:false});}
     else q=q.order("created_at",{ascending:false});
     const r=await q.limit(limit);if(!r.error)return r.data;loadScores.err=r.error.message;}catch(e){loadScores.err=e.message;}}
   let a=getLocal();
-  if(kind==="top")a=a.filter(r=>r.mode===mode&&r.difficulty===diff&&(mode==="name"||r.show_country===sc)).sort((x,y)=>y.score-x.score);
+  if(kind==="top")a=a.filter(r=>r.mode===mode&&(mode==="flag"||r.difficulty===diff)&&(mode!=="find"||r.show_country===sc)).sort((x,y)=>y.score-x.score);
   else a=a.slice().reverse();
   return a.slice(0,limit);
 }
-const gname=r=>(r.mode==="name"?"Name":"Find"+(r.show_country?"+country":""))+" · "+DIFF[r.difficulty];
+const gname=r=>r.mode==="flag"?"Flag → Country":(r.mode==="name"?"Name":"Find"+(r.show_country?"+country":""))+" · "+DIFF[r.difficulty];
 async function renderScores(){
   const el=$("scoreTable");el.innerHTML='<div class="sub">Loading…</div>';loadScores.err=null;
   $("scoreFilters").classList.toggle("hide",tab!=="top");
+  $("fDiff").classList.toggle("hide",$("fGame").value==="flag");
   const rows=await loadScores(tab,$("fGame").value,+$("fDiff").value);
   $("scoresSrc").textContent=sb?(loadScores.err?"⚠️ Could not reach Supabase ("+loadScores.err+"). Showing this device only.":"☁️ Scores from everyone using this game"):"Showing this device only.";
   if(!rows.length){el.innerHTML='<div class="sub">No scores yet — play a game!</div>';return;}
@@ -231,21 +257,24 @@ async function renderScores(){
     ?`<tr><td>${i+1}. ${esc(r.player)}</td><td class="m">${new Date(r.created_at).toLocaleDateString()}</td><td class="r">${r.score}</td></tr>`
     :`<tr><td>${esc(r.player)}<br><span class="m">${esc(gname(r))}</span></td><td class="m">${new Date(r.created_at).toLocaleDateString()}</td><td class="r">${r.score}</td></tr>`).join("")+"</table>";
 }
-$("scoresBtn").onclick=()=>{$("fGame").value=S.mode==="name"?"name":S.showCountry?"find1":"find0";$("fDiff").value=S.diff;$("scores").classList.remove("hide");renderScores();};
+$("scoresBtn").onclick=()=>{$("fGame").value=S.mode==="flag"?"flag":S.mode==="name"?"name":S.showCountry?"find1":"find0";$("fDiff").value=S.diff;$("scores").classList.remove("hide");renderScores();};
 $("scoresClose").onclick=()=>$("scores").classList.add("hide");
 $("fGame").onchange=$("fDiff").onchange=renderScores;
 document.querySelectorAll("[data-tab]").forEach(b=>b.onclick=()=>{tab=b.dataset.tab;document.querySelectorAll("[data-tab]").forEach(x=>x.classList.toggle("on",x===b));renderScores();});
 // ---------- menu wiring ----------
-document.querySelectorAll("[data-mode]").forEach(b=>b.onclick=()=>{S.mode=b.dataset.mode;document.querySelectorAll("[data-mode]").forEach(x=>x.classList.toggle("on",x===b));$("ccWrap").classList.toggle("hide",S.mode!=="find");});
+document.querySelectorAll("[data-mode]").forEach(b=>b.onclick=()=>{S.mode=b.dataset.mode;document.querySelectorAll("[data-mode]").forEach(x=>x.classList.toggle("on",x===b));$("ccWrap").classList.toggle("hide",S.mode!=="find");$("diffSec").classList.toggle("hide",S.mode==="flag");});
 document.querySelectorAll("[data-d]").forEach(b=>b.onclick=()=>{S.diff=+b.dataset.d;document.querySelectorAll("[data-d]").forEach(x=>x.classList.toggle("on",x===b));});
 $("cc").onchange=e=>S.showCountry=e.target.checked;
 $("start").onclick=()=>{localStorage.setItem("gg_player",$("player").value.trim());startGame();};
 $("home").onclick=()=>{$("panel").classList.add("hide");clearMarks();$("menu").classList.remove("hide");checkSync();};
 $("start").disabled=true;$("start").textContent="Loading places…";
-fetch("cities.json").then(r=>r.json()).then(a=>{
-  const seen={};a.forEach(x=>{const k=x[0]+"|"+x[1];seen[k]=(seen[k]||0)+1;});
-  CITIES=a.map(x=>({n:x[0],c:x[1],lat:x[2],lon:x[3],t:x[4],k:norm(x[0]+" "+x[1]),dup:seen[x[0]+"|"+x[1]]>1}));
-  $("start").disabled=false;$("start").textContent=`Start · ${ROUNDS} rounds`;
-}).catch(()=>{$("start").textContent="Could not load cities.json";});
+Promise.all([
+  fetch("cities.json").then(r=>r.json()).then(a=>{
+    const seen={};a.forEach(x=>{const k=x[0]+"|"+x[1];seen[k]=(seen[k]||0)+1;});
+    CITIES=a.map(x=>({n:x[0],c:x[1],lat:x[2],lon:x[3],t:x[4],k:norm(x[0]+" "+x[1]),dup:seen[x[0]+"|"+x[1]]>1}));
+  }),
+  fetch("countries.json").then(r=>r.json()).then(a=>{COUNTRIES=a;})
+]).then(()=>{$("start").disabled=false;$("start").textContent=`Start · ${ROUNDS} rounds`;})
+  .catch(()=>{$("start").textContent="Could not load game data";});
 checkSync();
 </script></body></html>
